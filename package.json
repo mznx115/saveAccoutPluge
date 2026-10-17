@@ -1,0 +1,13 @@
+{
+  "name": "save-account-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chrome/Edge MV3 扩展：按二级域名保存 Cookie 与本地存储，一键切换账号",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "check": "node tools/check.mjs",
+    "build:psl": "node tools/build-psl.mjs",
+    "icons": "pwsh -NoProfile -File tools/make-icons.ps1"
+  }
+}

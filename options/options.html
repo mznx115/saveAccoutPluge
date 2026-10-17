@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <title>保存账号插件 · 管理页</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <div>
+        <h1>保存账号插件</h1>
+        <p class="sub">按二级域名保存 Cookie 与本地存储到本地文件，随时切换账号。数据不会离开这台电脑。</p>
+      </div>
+      <div id="lockStatus" class="badge">—</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="card" id="sec-storage">
+      <h2>1 · 存储与镜像</h2>
+      <div id="storageBody" class="body"></div>
+    </section>
+
+    <section class="card" id="sec-security">
+      <h2>2 · 加密</h2>
+      <div id="securityBody" class="body"></div>
+    </section>
+
+    <section class="card" id="sec-settings">
+      <h2>3 · 设置</h2>
+      <div id="settingsBody" class="body"></div>
+    </section>
+
+    <section class="card" id="sec-accounts">
+      <h2>4 · 已保存的账号</h2>
+      <div id="accountsBody" class="body"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

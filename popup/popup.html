@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <title>保存账号插件</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="hd">
+      <div class="hd-title">保存账号插件</div>
+      <div class="hd-badge" id="lockBadge">—</div>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <main id="app" class="app">
+      <div class="loading">加载中…</div>
+    </main>
+
+    <footer class="ft">
+      <button class="link" id="openOptions" type="button">管理页</button>
+      <button class="link" id="openStorage" type="button">导出到文件</button>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --fg: #101828;
+  --fg-muted: #667085;
+  --border: #e4e7ec;
+  --primary: #2563eb;
+  --primary-fg: #fff;
+  --danger: #d92d20;
+  --ok: #067647;
+  --warn-bg: #fffaeb;
+  --warn-border: #fedf89;
+  --warn-fg: #93370d;
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101216;
+    --card: #191c22;
+    --fg: #ecedf0;
+    --fg-muted: #98a2b3;
+    --border: #2c3039;
+    --warn-bg: #2a2013;
+    --warn-border: #6b4d13;
+    --warn-fg: #f5c76a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+.top { background: var(--card); border-bottom: 1px solid var(--border); }
+.top-inner {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 20px 24px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+h1 { margin: 0 0 4px; font-size: 18px; }
+.sub { margin: 0; color: var(--fg-muted); font-size: 13px; }
+
+.badge {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.badge.on { color: var(--ok); border-color: currentColor; }
+.badge.locked { color: var(--warn-fg); border-color: currentColor; }
+
+main { max-width: 860px; margin: 0 auto; padding: 20px 24px 60px; display: flex; flex-direction: column; gap: 16px; }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+.card h2 { margin: 0 0 12px; font-size: 15px; }
+.body > * + * { margin-top: 10px; }
+
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row.between { justify-content: space-between; }
+.grow { flex: 1; min-width: 200px; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  padding: 7px 12px;
+}
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.primary { background: var(--primary); color: var(--primary-fg); border-color: transparent; font-weight: 600; }
+button.danger { color: var(--danger); }
+button.tiny { padding: 3px 9px; font-size: 12px; }
+
+input[type="text"], input[type="password"], select {
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  min-width: 180px;
+}
+label.field { display: inline-flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--fg-muted); }
+label.inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg); }
+
+.hint { color: var(--fg-muted); font-size: 12px; }
+.mono { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-fg); padding: 10px 12px; border-radius: 8px; font-size: 13px; }
+.ok { color: var(--ok); }
+.err { color: var(--danger); }
+
+.site-block { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.site-hd {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+.site-hd .name { font-weight: 600; flex: 1; }
+.site-hd .meta { color: var(--fg-muted); font-size: 12px; }
+ul.accounts { list-style: none; margin: 0; padding: 0; }
+ul.accounts li { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border); }
+ul.accounts .acc-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ul.accounts .acc-meta { color: var(--fg-muted); font-size: 12px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: #101828; color: #fff; padding: 10px 16px; border-radius: 8px;
+  font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.3); max-width: 80vw;
+}
+.toast.error { background: var(--danger); }
+
+details summary { cursor: pointer; font-size: 13px; color: var(--fg-muted); }
