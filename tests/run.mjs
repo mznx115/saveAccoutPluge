@@ -46,7 +46,9 @@ const {
   storageKeyOf, readSiteFile, writeSiteFile, deleteSiteFile, listSiteFiles, getStorageUsage,
   clearAll, mergeSiteFile,
 } = await import('../lib/store.js');
-const { mirrorPath } = await import('../lib/mirror.js');
+const {
+  bundleFileName, buildBundle, isBundle, normalizeImport, countAccounts, BUNDLE_FORMAT,
+} = await import('../lib/bundle.js');
 
 /* ----------------------------- 迷你测试框架 ----------------------------- */
 let passed = 0;
@@ -119,10 +121,9 @@ check('冒号替换（IPv6）', siteToFileName('::1'), '__1');
 check('Windows 保留名加前缀', siteToFileName('con'), '_con');
 check('文件名回推站点', fileNameToSite('taobao.com.json'), 'taobao.com');
 
-group('镜像路径');
-check('默认子目录', mirrorPath('保存账号插件', 'taobao.com'), '保存账号插件/taobao.com.json');
-check('非法字符被清理', mirrorPath('a/b:c', 'taobao.com'), 'abc/taobao.com.json');
-check('空目录名有兜底', mirrorPath('', 'taobao.com'), '保存账号插件/taobao.com.json');
+group('导出文件名');
+check('带日期时间戳', bundleFileName(new Date(2026, 0, 2, 3, 4, 5)), '保存账号插件-全部账号-20260102-030405.json');
+check('补零', bundleFileName(new Date(2026, 11, 31, 23, 59, 59)), '保存账号插件-全部账号-20261231-235959.json');
 
 /* ----------------------------- 2. 编码 ----------------------------- */
 group('base64 往返');
@@ -298,6 +299,54 @@ check('旧标签没有覆盖新标签', mergedAgain.file.accounts.find((a) => a.
 await writeSiteFile('a.com', merged.file);
 check('clearAll 删除所有站点', await clearAll(), 1);
 check('clearAll 后列表为空', (await listSiteFiles()).length, 0);
+
+/* ----------------------------- 7. 全部域名打包成一个文件 ----------------------------- */
+group('导出：所有域名打包成单个文件');
+const manySites = [
+  { site: 'taobao.com', data: { ...emptySiteFile('taobao.com'), accounts: [{ id: 't1' }, { id: 't2' }] } },
+  { site: 'github.com', data: { ...emptySiteFile('github.com'), accounts: [{ id: 'g1' }] } },
+  { site: 'bilibili.com', data: { ...emptySiteFile('bilibili.com'), accounts: [{ id: 'b1' }] } },
+];
+const bundle = buildBundle(manySites);
+check('是一个 bundle', isBundle(bundle), true);
+check('format 标识正确', bundle.format, BUNDLE_FORMAT);
+check('收录 3 个站点', bundle.siteCount, 3);
+check('统计账号总数', countAccounts(bundle), 4);
+check('sites 里按域名分组', Object.keys(bundle.sites).sort(), ['bilibili.com', 'github.com', 'taobao.com']);
+check('空输入不会崩', buildBundle([]).siteCount, 0);
+
+group('导入：从一个文件恢复全部域名');
+const restored = normalizeImport(bundle, 'backup.json');
+check('还原出 3 个站点', restored.length, 3);
+check('站点名保留', restored.map((r) => r.site).sort(), ['bilibili.com', 'github.com', 'taobao.com']);
+check('账号数据完整', restored.find((r) => r.site === 'taobao.com').data.accounts.length, 2);
+
+// 往返：打包 -> 序列化 -> 解析 -> 拆包，数据不丢
+const roundTrip = normalizeImport(JSON.parse(JSON.stringify(bundle)), 'x.json');
+check('JSON 往返后站点数一致', roundTrip.length, 3);
+check('往返后账号仍完整', countAccounts({ sites: Object.fromEntries(roundTrip.map((r) => [r.site, r.data])) }), 4);
+
+group('导入：兼容旧的单站点文件');
+const single = normalizeImport(
+  { site: 'taobao.com', accounts: [{ id: 'old1' }] }, 'taobao.com.json',
+);
+check('单站点文件得到 1 条', single.length, 1);
+check('站点名取自 site 字段', single[0].site, 'taobao.com');
+
+const singleNoSite = normalizeImport({ accounts: [{ id: 'x' }] }, 'example.com.json');
+check('缺少 site 时用文件名兜底', singleNoSite[0].site, 'example.com');
+
+group('导入：拒绝非法输入');
+const rejects = (fn) => { try { fn(); return ''; } catch (err) { return err.message; } };
+check('非法 JSON 对象', rejects(() => normalizeImport(null)) !== '', true);
+check('缺 accounts 的普通对象', rejects(() => normalizeImport({ foo: 1 })) !== '', true);
+check('bundle 里站点缺 accounts', rejects(() => normalizeImport({ format: BUNDLE_FORMAT, sites: { 'a.com': { foo: 1 } } })).includes('a.com'), true);
+check('空 bundle 报错', rejects(() => normalizeImport({ format: BUNDLE_FORMAT, sites: {} })) !== '', true);
+
+group('导入：宽松格式与文件名兜底');
+const loose = normalizeImport({ sites: { 'x.com': { accounts: [{ id: '1' }] } } });
+check('无 format 但带 sites 也能识别', loose[0].site, 'x.com');
+check('文件名不像域名时不瞎猜', rejects(() => normalizeImport({ accounts: [] }, 'backup.json')) !== '', true);
 
 /* ----------------------------- 汇总 ----------------------------- */
 console.log(`\n${'─'.repeat(48)}`);

@@ -1,12 +1,9 @@
 import { decryptJson, deriveKey, encryptJson } from '../lib/crypto.js';
+import { exportAll, isDownloadsSupported, normalizeImport, readJsonFiles } from '../lib/bundle.js';
 import { presentError } from '../lib/errors.js';
 import { siteOriginPatterns } from '../lib/host-permission.js';
-import {
-  isDownloadsSupported, mirrorAll, mirrorSite, readJsonFiles,
-} from '../lib/mirror.js';
 import { enableEncryption, isUnlocked, lock, removeAccount, unlock } from '../lib/schema.js';
 import { getSettings, setSettings } from '../lib/settings.js';
-import { fileNameToSite } from '../lib/site.js';
 import {
   clearAll, deleteSiteFile, getStorageUsage, listSiteFiles, mergeSiteFile,
   readSiteFile, writeSiteFile,
@@ -107,25 +104,19 @@ function renderStorage() {
         <div class="hint">保存账号时<b>不会</b>下载任何文件；只有你在这里点「导出」才会写文件。</div>
       </div>
       <div class="row">
-        <button data-act="export-all" type="button"${downloadsOk ? '' : ' disabled'}>导出全部</button>
+        <button data-act="export-all" type="button"${downloadsOk ? '' : ' disabled'}>导出全部（单个文件）</button>
         <button data-act="show-downloads" type="button"${downloadsOk ? '' : ' disabled'}>打开下载文件夹</button>
       </div>
     </div>
 
     <div class="hint">
-      导出位置：<span class="mono">&lt;下载目录&gt;\\${escapeHtml(state.settings.mirrorDirName)}\\&lt;域名&gt;.json</span>（一个二级域名一个文件，同名会覆盖）<br>
-      浏览器不允许插件在未授权的情况下写任意目录，所以导出位置固定为下载目录。
+      导出会把<b>所有域名打包成一个文件</b>，不再是一个域名一个文件：<br>
+      <span class="mono">保存账号插件-全部账号-YYYYMMDD-hhmmss.json</span>（落在下载目录）<br>
+      导入时选中这个文件即可一次性恢复全部域名，也仍兼容以前导出的单站点 .json。
     </div>
 
     <div class="row">
-      <label class="field">导出子文件夹名
-        <input id="mirrorDirInput" type="text" value="${escapeHtml(state.settings.mirrorDirName)}" maxlength="60">
-      </label>
-      <button data-act="save-mirror-dir" type="button">保存</button>
-    </div>
-
-    <div class="row">
-      <button data-act="import" type="button">从 .json 文件导入</button>
+      <button class="primary" data-act="import" type="button">导入账号文件</button>
       <button class="danger" data-act="clear-all" type="button">删除全部快照</button>
       <input type="file" id="importInput" accept=".json,application/json" multiple hidden>
     </div>
@@ -249,7 +240,6 @@ function renderAccounts() {
           <span class="name">${escapeHtml(item.site)}</span>
           <span class="meta">${accounts.length} 个账号 · ${file.isEncrypted ? '已加密' : '明文'} · 更新于 ${relativeTime(file.updatedAt)}</span>
           ${granted ? '' : `<button class="tiny" data-act="grant-host" data-site="${escapeHtml(item.site)}" type="button">授权访问该站</button>`}
-          <button class="tiny" data-act="export-one" data-site="${escapeHtml(item.site)}" type="button">导出</button>
           <button class="tiny danger" data-act="delete-file" data-site="${escapeHtml(item.site)}" type="button">删除文件</button>
         </div>
         ${accounts.length === 0
@@ -304,14 +294,6 @@ async function decryptAllFiles(password, salt, iterations) {
 
 /* ------------------------------- 导入 ------------------------------- */
 
-function normalizeImported(data, fileName) {
-  if (!data || typeof data !== 'object') throw new Error('不是合法的 JSON 对象');
-  if (!Array.isArray(data.accounts)) throw new Error('缺少 accounts 数组，可能不是本插件导出的文件');
-  const site = data.site || fileNameToSite(fileName);
-  if (!site) throw new Error('无法确定这个文件属于哪个站点');
-  return { ...data, site };
-}
-
 async function importFiles(fileList) {
   const parsed = await readJsonFiles(fileList);
   const report = { added: 0, skipped: 0, sites: 0, failed: [] };
@@ -319,22 +301,29 @@ async function importFiles(fileList) {
 
   for (const entry of parsed) {
     if (entry.error) { report.failed.push(`${entry.fileName}：${entry.error}`); continue; }
-    let incoming;
+
+    let entries;
     try {
-      incoming = normalizeImported(entry.data, entry.fileName);
+      entries = normalizeImport(entry.data, entry.fileName);
     } catch (err) {
       report.failed.push(`${entry.fileName}：${err.message}`);
       continue;
     }
 
-    const existing = await readSiteFile(incoming.site);
-    const { file, added, skipped } = mergeSiteFile(existing, incoming);
-    await writeSiteFile(incoming.site, file);
-    report.added += added;
-    report.skipped += skipped;
-    report.sites++;
-    if (incoming.kdf?.salt && incoming.kdf.salt !== state.settings.kdfSalt) {
-      saltMismatch.push(incoming.site);
+    for (const incoming of entries) {
+      try {
+        const existing = await readSiteFile(incoming.site);
+        const { file, added, skipped } = mergeSiteFile(existing, incoming.data);
+        await writeSiteFile(incoming.site, file);
+        report.added += added;
+        report.skipped += skipped;
+        report.sites++;
+        if (incoming.data.kdf?.salt && incoming.data.kdf.salt !== state.settings.kdfSalt) {
+          saltMismatch.push(incoming.site);
+        }
+      } catch (err) {
+        report.failed.push(`${incoming.site}：${presentError(err)}`);
+      }
     }
   }
 
@@ -350,30 +339,12 @@ const actions = {
   async 'export-all'() {
     await run(async () => {
       if (!state.files.length) throw new Error('还没有任何快照');
-      const results = await mirrorAll(state.files, state.settings.mirrorDirName);
-      const failed = results.filter((r) => !r.ok);
-      if (failed.length === results.length) throw new Error(`全部导出失败：${failed[0].error}`);
-      return { ok: results.length - failed.length, failed: failed.length };
-    }, (r) => (r.failed ? `已导出 ${r.ok} 个文件，${r.failed} 个失败` : `已导出 ${r.ok} 个文件到下载文件夹`));
-  },
-
-  async 'export-one'(btn) {
-    const site = btn.dataset.site;
-    await run(async () => {
-      const file = await readSiteFile(site);
-      if (!file) throw new Error('快照不存在');
-      await mirrorSite(site, file, state.settings.mirrorDirName);
-    }, '已导出到下载文件夹');
+      return exportAll(state.files);
+    }, (r) => `已导出 ${r.siteCount} 个站点、${r.accountCount} 个账号到「下载」文件夹：${r.fileName}`);
   },
 
   async 'show-downloads'() {
     await run(() => chrome.downloads.showDefaultFolder(), null);
-  },
-
-  async 'save-mirror-dir'() {
-    const name = ($('#mirrorDirInput')?.value || '').trim().replace(/[\\/:*?"<>|]/g, '');
-    if (!name) { toast('文件夹名不能为空', 'error'); return; }
-    await run(() => setSettings({ mirrorDirName: name }), `镜像文件夹名已改为「${name}」`);
   },
 
   async import() {

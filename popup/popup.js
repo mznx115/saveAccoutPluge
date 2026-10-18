@@ -1,12 +1,12 @@
 import { call } from '../lib/bus.js';
+import { exportAll, isDownloadsSupported } from '../lib/bundle.js';
 import { presentError } from '../lib/errors.js';
 import { ensureHostPermission } from '../lib/host-permission.js';
-import { isDownloadsSupported, mirrorSite } from '../lib/mirror.js';
 import {
   emptySiteFile, getAccountPayload, isUnlocked, putAccount, removeAccount, unlock,
 } from '../lib/schema.js';
 import { getSettings } from '../lib/settings.js';
-import { readSiteFile, writeSiteFile } from '../lib/store.js';
+import { listSiteFiles, readSiteFile, writeSiteFile } from '../lib/store.js';
 import { escapeHtml, relativeTime } from '../lib/ui.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -198,19 +198,17 @@ function renderAccount(account) {
 
 /* ------------------------------- 操作 ------------------------------- */
 
-/** 只有在用户明确要求导出时才写文件；保存/删除都不会触发下载 */
-async function exportToFile(site, data) {
+/** 导出全部站点为单个文件（不是每个域名一个文件） */
+async function exportEverything() {
   if (!isDownloadsSupported()) {
     toast('当前浏览器不支持 downloads API', 'error');
     return false;
   }
-  try {
-    await mirrorSite(site, data, state.settings.mirrorDirName);
-    return true;
-  } catch (err) {
-    toast(`导出失败：${presentError(err)}`, 'error');
-    return false;
-  }
+  const items = await listSiteFiles();
+  if (!items.length) { toast('还没有保存过任何账号', 'error'); return false; }
+  const result = await exportAll(items);
+  toast(`已导出 ${result.siteCount} 个站点、${result.accountCount} 个账号到「下载」文件夹：${result.fileName}`);
+  return true;
 }
 
 /**
@@ -323,11 +321,7 @@ async function doExport() {
   if (state.busy) return;
   setBusy(true);
   try {
-    const file = await loadFile();
-    if (!(file.accounts || []).length) { toast('还没有保存过账号', 'error'); return; }
-    if (needsUnlock()) { toast('请先解锁后再导出', 'error'); return; }
-    const ok = await exportToFile(state.site, file);
-    if (ok) toast('已导出到「下载」文件夹');
+    await exportEverything();
     render();
   } catch (err) {
     toast(presentError(err), 'error');

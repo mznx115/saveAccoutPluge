@@ -164,13 +164,13 @@ for (const rel of ['popup/popup.js', 'options/options.js']) {
   if (!existsSync(abs)) continue;
   const src = readFileSync(abs, 'utf8');
   const doSave = src.match(saveFnRe);
-  if (doSave && /\b(mirrorSite|mirrorAll|downloadJson|chrome\.downloads)\b/.test(doSave[0])) {
+  if (doSave && /\b(exportAll|exportOne|downloadText|chrome\.downloads)\b/.test(doSave[0])) {
     fail(`${rel}: doSave 里出现了下载调用（保存不应该触发下载）`);
   }
   // 写账号的地方也不该顺带下载
   for (const m of src.matchAll(/async function (putAccount|importFiles)[\s\S]*?\n\}/g)) {
-    if (/\b(mirrorSite|mirrorAll|downloadJson)\b/.test(m[1])) {
-      fail(`${rel}: ${m[1]} 相关流程里出现了镜像/下载调用`);
+    if (/\b(exportAll|downloadText)\b/.test(m[1])) {
+      fail(`${rel}: ${m[1]} 相关流程里出现了导出/下载调用`);
     }
   }
 }
