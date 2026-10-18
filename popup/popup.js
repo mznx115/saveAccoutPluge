@@ -22,7 +22,6 @@ const state = {
   file: null,
   busy: false,
   pendingDelete: null,
-  mirrorWarning: '',
 };
 
 /* ------------------------------- 小工具 ------------------------------- */
@@ -74,10 +73,8 @@ function applyDisabledState() {
   }
   if (locked) {
     banner('快照已加密，请先在上方输入口令解锁后再操作。', 'warn');
-  } else if (!state.mirrorWarning && !state.settings?.mirrorEnabled) {
-    banner('已关闭自动镜像，快照只存在插件内部。', 'warn');
   } else {
-    banner(state.mirrorWarning);
+    banner(null);
   }
 }
 
@@ -136,7 +133,7 @@ function render() {
 
   if (state.unsupportedReason) {
     app.innerHTML = `<div class="card"><div class="empty">${escapeHtml(state.unsupportedReason)}</div></div>`;
-    banner(state.mirrorWarning);
+    banner(null);
     return;
   }
 
@@ -201,20 +198,18 @@ function renderAccount(account) {
 
 /* ------------------------------- 操作 ------------------------------- */
 
-/** 把最新数据镜像到 下载目录/保存账号插件/<site>.json，失败不影响主流程 */
-async function mirror(site, data, { force = false } = {}) {
-  state.mirrorWarning = '';
-  if (!force && !state.settings.mirrorEnabled) return null;
+/** 只有在用户明确要求导出时才写文件；保存/删除都不会触发下载 */
+async function exportToFile(site, data) {
   if (!isDownloadsSupported()) {
-    state.mirrorWarning = '当前浏览器不支持 downloads API，无法镜像到下载文件夹。';
-    return null;
+    toast('当前浏览器不支持 downloads API', 'error');
+    return false;
   }
   try {
     await mirrorSite(site, data, state.settings.mirrorDirName);
     return true;
   } catch (err) {
-    state.mirrorWarning = `镜像到下载文件夹失败：${presentError(err)}（快照已保存在插件内部）`;
-    return null;
+    toast(`导出失败：${presentError(err)}`, 'error');
+    return false;
   }
 }
 
@@ -236,9 +231,7 @@ async function doSave() {
     await putAccount(file, snapshot, { label });
     await writeSiteFile(state.site, file);
     state.file = file;
-    const mirrored = await mirror(state.site, file);
-    toast(`已保存「${label}」：${snapshot.cookies.length} 个 cookie、${Object.keys(snapshot.webStorage).length} 个 origin`
-      + (mirrored ? '，并已镜像到下载文件夹' : ''));
+    toast(`已保存「${label}」：${snapshot.cookies.length} 个 cookie、${Object.keys(snapshot.webStorage).length} 个 origin`);
     render();
   } catch (err) {
     toast(presentError(err), 'error');
@@ -299,7 +292,6 @@ async function doDelete(accountId) {
     removeAccount(file, accountId);
     await writeSiteFile(state.site, file);
     state.file = file;
-    await mirror(state.site, file);
     toast('已删除该账号快照');
   } catch (err) {
     toast(presentError(err), 'error');
@@ -334,8 +326,8 @@ async function doExport() {
     const file = await loadFile();
     if (!(file.accounts || []).length) { toast('还没有保存过账号', 'error'); return; }
     if (needsUnlock()) { toast('请先解锁后再导出', 'error'); return; }
-    const ok = await mirror(state.site, file, { force: true });
-    toast(ok ? '已导出到「下载」文件夹' : '导出失败', ok ? 'info' : 'error');
+    const ok = await exportToFile(state.site, file);
+    if (ok) toast('已导出到「下载」文件夹');
     render();
   } catch (err) {
     toast(presentError(err), 'error');

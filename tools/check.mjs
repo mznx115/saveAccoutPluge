@@ -156,6 +156,25 @@ for (const file of allFiles.filter((f) => ['.js', '.mjs'].includes(extname(f))))
   }
 }
 
+/* ---------------------------- 7. 不许在保存流程里偷偷下载 ---------------------------- */
+// 需求：点「保存当前账号」不应该产生任何下载。下载只允许由用户显式点「导出」触发。
+const saveFnRe = /async function doSave\([\s\S]*?\n\}/;
+for (const rel of ['popup/popup.js', 'options/options.js']) {
+  const abs = join(ROOT, rel);
+  if (!existsSync(abs)) continue;
+  const src = readFileSync(abs, 'utf8');
+  const doSave = src.match(saveFnRe);
+  if (doSave && /\b(mirrorSite|mirrorAll|downloadJson|chrome\.downloads)\b/.test(doSave[0])) {
+    fail(`${rel}: doSave 里出现了下载调用（保存不应该触发下载）`);
+  }
+  // 写账号的地方也不该顺带下载
+  for (const m of src.matchAll(/async function (putAccount|importFiles)[\s\S]*?\n\}/g)) {
+    if (/\b(mirrorSite|mirrorAll|downloadJson)\b/.test(m[1])) {
+      fail(`${rel}: ${m[1]} 相关流程里出现了镜像/下载调用`);
+    }
+  }
+}
+
 /* ---------------------------- 输出 ---------------------------- */
 console.log(`检查了 ${allFiles.length} 个文件。`);
 for (const n of notes) console.log(`  · 提示：${n}`);

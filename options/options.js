@@ -93,7 +93,7 @@ function renderLockBadge() {
   }
 }
 
-/* ------------------------------- 1. 存储与镜像 ------------------------------- */
+/* ------------------------------- 1. 存储与导出 ------------------------------- */
 
 function renderStorage() {
   const el = $('#storageBody');
@@ -104,29 +104,24 @@ function renderStorage() {
     <div class="row between">
       <div>
         <div>快照保存在<b>插件内部存储</b>：${state.files.length} 个站点、${total} 个账号、占用 ${state.usage.pretty}</div>
-        <div class="hint">不需要任何目录授权，浏览器重启后也不会失效。</div>
+        <div class="hint">保存账号时<b>不会</b>下载任何文件；只有你在这里点「导出」才会写文件。</div>
       </div>
       <div class="row">
-        <button data-act="export-all" type="button"${downloadsOk ? '' : ' disabled'}>导出全部到下载文件夹</button>
+        <button data-act="export-all" type="button"${downloadsOk ? '' : ' disabled'}>导出全部</button>
         <button data-act="show-downloads" type="button"${downloadsOk ? '' : ' disabled'}>打开下载文件夹</button>
       </div>
     </div>
 
-    <label class="inline">
-      <input type="checkbox" id="mirrorChk"${state.settings.mirrorEnabled ? ' checked' : ''}>
-      <span>每次保存后自动镜像一份 .json 到下载文件夹（一个二级域名一个文件）</span>
-    </label>
+    <div class="hint">
+      导出位置：<span class="mono">&lt;下载目录&gt;\\${escapeHtml(state.settings.mirrorDirName)}\\&lt;域名&gt;.json</span>（一个二级域名一个文件，同名会覆盖）<br>
+      浏览器不允许插件在未授权的情况下写任意目录，所以导出位置固定为下载目录。
+    </div>
 
     <div class="row">
-      <label class="field">镜像子文件夹名
+      <label class="field">导出子文件夹名
         <input id="mirrorDirInput" type="text" value="${escapeHtml(state.settings.mirrorDirName)}" maxlength="60">
       </label>
       <button data-act="save-mirror-dir" type="button">保存</button>
-    </div>
-    <div class="hint">
-      实际路径：<span class="mono">&lt;下载目录&gt;\\${escapeHtml(state.settings.mirrorDirName)}\\&lt;域名&gt;.json</span><br>
-      浏览器不允许插件在未授权的情况下写任意目录，所以镜像位置固定为下载目录；插件内部存储才是权威数据，
-      下载文件夹里的文件是给你看的备份（可用下面的「导入」再读回来）。
     </div>
 
     <div class="row">
@@ -341,9 +336,6 @@ async function importFiles(fileList) {
     if (incoming.kdf?.salt && incoming.kdf.salt !== state.settings.kdfSalt) {
       saltMismatch.push(incoming.site);
     }
-    if (state.settings.mirrorEnabled) {
-      try { await mirrorSite(incoming.site, file, state.settings.mirrorDirName); } catch { /* 忽略 */ }
-    }
   }
 
   if (saltMismatch.length) {
@@ -522,9 +514,6 @@ const actions = {
       if (!file) throw new Error('快照不存在');
       removeAccount(file, id);
       await writeSiteFile(site, file);
-      if (state.settings.mirrorEnabled) {
-        try { await mirrorSite(site, file, state.settings.mirrorDirName); } catch { /* 忽略 */ }
-      }
     }, '账号已删除');
   },
 
@@ -565,10 +554,6 @@ document.addEventListener('change', async (event) => {
   if (id === 'granularitySel') await run(() => setSettings({ granularity: event.target.value }), '已保存');
   if (id === 'saveSessionChk') await run(() => setSettings({ saveSessionStorage: event.target.checked }), '已保存');
   if (id === 'incognitoChk') await run(() => setSettings({ includeIncognito: event.target.checked }), '已保存');
-  if (id === 'mirrorChk') {
-    const on = event.target.checked;
-    await run(() => setSettings({ mirrorEnabled: on }), on ? '已开启自动镜像' : '已关闭自动镜像');
-  }
 });
 
 refresh().catch((err) => {

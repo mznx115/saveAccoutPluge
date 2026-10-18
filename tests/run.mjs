@@ -169,8 +169,8 @@ const fresh = await getSettings();
 check('全新安装默认不加密', fresh.encryption, false);
 check('全新安装没有盐值', fresh.kdfSalt, null);
 check('全新安装不是解锁态', await isUnlocked(), false);
-check('默认开启镜像', fresh.mirrorEnabled, true);
 check('默认按二级域名归组', fresh.granularity, 'etld1');
+check('默认没有自动下载开关（保存不写文件）', 'mirrorEnabled' in fresh, false);
 
 // 旧版本残留的脏状态：声称已加密但没有盐值
 const dirty = normalizeSettings({ ...fresh, encryption: true, kdfSalt: null });
