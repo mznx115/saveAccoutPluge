@@ -10,7 +10,7 @@ import {
   clearAll, deleteSiteFile, getStorageUsage, listSiteFiles, mergeSiteFile,
   readSiteFile, writeSiteFile,
 } from '../lib/store.js';
-import { syncWithWebDav } from '../lib/sync.js';
+import { syncWithWebDav, uploadLocalToWebDav } from '../lib/sync.js';
 import { BUNDLE_NAME, testConnection } from '../lib/webdav.js';
 import { escapeHtml, relativeTime } from '../lib/ui.js';
 
@@ -177,6 +177,12 @@ function renderWebDav() {
       <button data-act="dav-save" type="button">保存配置</button>
       <button data-act="dav-test" type="button">测试连接</button>
       <button class="primary" data-act="dav-sync" type="button">立即同步</button>
+      <button class="danger" data-act="dav-upload" type="button">仅上传（覆盖远端）</button>
+    </div>
+
+    <div class="hint">
+      <b>同步</b>：下载远端 → 与本地合并 → 上传，两边数据都会保留（推荐）。<br>
+      <b>仅上传</b>：直接用本地数据覆盖远端，<b>不下载也不合并</b>。远端多出来的账号会被删除，请谨慎使用。
     </div>
 
     <div class="hint" id="davStatus">
@@ -499,6 +505,55 @@ const actions = {
       console.error(err);
       toast(presentError(err), 'error');
       setDavStatus(`同步失败：${presentError(err)}`);
+    } finally {
+      state.busy = false;
+      await refresh();
+    }
+  },
+
+  async 'dav-upload'() {
+    if (state.busy) return;
+    // 先申请权限：此刻仍在用户点击手势内
+    const form = readDavForm();
+    if (!form.username) { toast('请先填写邮箱或用户名', 'error'); return; }
+    const granted = await ensureDavPermission(form.url);
+    if (!granted) { toast('未授权访问该 WebDAV 地址', 'error'); return; }
+
+    // 破坏性操作，必须先确认；文案里明确"会删除远端多出来的账号"
+    const ok = window.confirm(
+      '「仅上传」会用本地数据【完全覆盖】远端备份。\n\n'
+      + '· 不会下载，也不会合并\n'
+      + '· 远端有、而本地没有的账号会被删除\n\n'
+      + '如果你不确定，请改用「立即同步」。\n\n确定要覆盖远端吗？',
+    );
+    if (!ok) return;
+
+    state.busy = true;
+    document.querySelectorAll('button[data-act]').forEach((b) => { b.disabled = true; });
+    try {
+      await setSettings({ webdav: { url: form.url, username: form.username, dir: form.dir } });
+      await setWebDavPassword(form.password);
+      const config = await resolveWebDavConfig(form);
+      if (!config.password) throw new Error('请先填写应用密码');
+
+      setDavStatus('正在上传本地数据…');
+      const result = await uploadLocalToWebDav(config, { listSiteFiles }, (step) => {
+        setDavStatus({
+          collect: '正在读取本地数据…',
+          'ensure-dir': '正在检查远端目录…',
+          upload: '正在覆盖远端数据…',
+        }[step] || '上传中…');
+      });
+
+      await setSettings({ webdav: { lastSyncAt: new Date().toISOString() } });
+      const msg = `已用本地数据覆盖远端：${result.siteCount} 个站点、${result.accountCount} 个账号`
+        + `（${(result.uploadedBytes / 1024).toFixed(1)} KB）`;
+      toast(msg);
+      setDavStatus(msg);
+    } catch (err) {
+      console.error(err);
+      toast(presentError(err), 'error');
+      setDavStatus(`上传失败：${presentError(err)}`);
     } finally {
       state.busy = false;
       await refresh();

@@ -50,7 +50,7 @@ const {
   bundleFileName, buildBundle, isBundle, normalizeImport, countAccounts, BUNDLE_FORMAT,
 } = await import('../lib/bundle.js');
 const { buildDavUrl, bundleUrl, BUNDLE_NAME } = await import('../lib/webdav.js');
-const { mergeRemoteIntoLocal, checkEncryptionCompat } = await import('../lib/sync.js');
+const { mergeRemoteIntoLocal, checkEncryptionCompat, uploadLocalToWebDav } = await import('../lib/sync.js');
 
 /* ----------------------------- 迷你测试框架 ----------------------------- */
 let passed = 0;
@@ -457,6 +457,66 @@ check('远端加密+本地明文被拒绝', Boolean(checkEncryptionCompat(
 check('两边都明文可合并', checkEncryptionCompat(
   [{ site: 'p.com', data: davPlainFile() }], { 'q.com': davPlainFile('q.com') },
 ), null);
+
+/* ----------------------------- 9. 仅上传 ----------------------------- */
+group('仅上传：用本地覆盖远端（不下载不合并）');
+
+// 用最小的 fetch 桩拦截真实网络请求，验证「只 PUT、不 GET」
+const fetchCalls = [];
+let lastPutBody = null;
+globalThis.fetch = async (url, init) => {
+  fetchCalls.push({ url, method: init?.method });
+  if (init?.method === 'PUT') lastPutBody = init.body;
+  if (init?.method === 'MKCOL') return new Response(null, { status: 405 }); // 已存在
+  if (init?.method === 'GET') throw new Error('仅上传不应发起 GET 请求');
+  return new Response(null, { status: 201 });
+};
+
+const davConfig = {
+  url: 'https://dav.example.com/dav/',
+  username: 'u@example.com',
+  password: 'app-pwd',
+  dir: 'save-accout-plugin',
+};
+
+const uploadDepts = {
+  listSiteFiles: async () => [
+    { site: 'taobao.com', data: { site: 'taobao.com', accounts: [{ id: 'u1' }, { id: 'u2' }] } },
+    { site: 'github.com', data: { site: 'github.com', accounts: [{ id: 'u3' }] } },
+  ],
+};
+
+const uploadResult = await uploadLocalToWebDav(davConfig, uploadDepts);
+check('上传统计站点数', uploadResult.siteCount, 2);
+check('上传统计账号数', uploadResult.accountCount, 3);
+check('上传字节数大于 0', uploadResult.uploadedBytes > 0, true);
+
+check('没有发起 GET（不下载）', fetchCalls.some((c) => c.method === 'GET'), false);
+check('发起了 PUT', fetchCalls.some((c) => c.method === 'PUT'), true);
+check('先 MKCOL 再 PUT',
+  fetchCalls.findIndex((c) => c.method === 'MKCOL') < fetchCalls.findIndex((c) => c.method === 'PUT'), true);
+
+const putPayload = JSON.parse(lastPutBody);
+check('PUT 的 format 正确', putPayload.format, BUNDLE_FORMAT);
+check('PUT 包含 2 个站点', Object.keys(putPayload.sites).length, 2);
+check('PUT 里账号完整', putPayload.sites['taobao.com'].accounts.length, 2);
+check('PUT 地址带默认目录', fetchCalls.find((c) => c.method === 'PUT').url,
+  `https://dav.example.com/dav/save-accout-plugin/${BUNDLE_NAME}`);
+
+group('仅上传：本地为空时拒绝');
+fetchCalls.length = 0;
+const emptyErr = await uploadLocalToWebDav(davConfig, { listSiteFiles: async () => [] })
+  .then(() => '')
+  .catch((e) => e.message);
+check('本地为空直接报错', emptyErr.includes('拒绝上传'), true);
+check('本地为空时不发任何请求', fetchCalls.length, 0);
+
+group('仅上传：401 有可读提示');
+globalThis.fetch = async () => new Response(null, { status: 401 });
+const authErr = await uploadLocalToWebDav(davConfig, uploadDepts)
+  .then(() => '')
+  .catch((e) => e.message);
+check('401 提示应用密码', authErr.includes('应用密码'), true);
 
 /* ----------------------------- 汇总 ----------------------------- */
 console.log(`\n${'─'.repeat(48)}`);
