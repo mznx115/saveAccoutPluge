@@ -352,10 +352,10 @@ check('文件名不像域名时不瞎猜', rejects(() => normalizeImport({ accou
 
 /* ----------------------------- 8. WebDAV ----------------------------- */
 group('WebDAV 地址拼接');
-check('坚果云默认地址 + 目录', buildDavUrl('https://dav.jianguoyun.com/dav/', 'cockpit-tools', ''),
-  'https://dav.jianguoyun.com/dav/cockpit-tools');
-check('带文件名', bundleUrl({ url: 'https://dav.jianguoyun.com/dav/', dir: 'cockpit-tools' }),
-  `https://dav.jianguoyun.com/dav/cockpit-tools/${BUNDLE_NAME}`);
+check('坚果云默认地址 + 目录', buildDavUrl('https://dav.jianguoyun.com/dav/', 'save-accout-plugin', ''),
+  'https://dav.jianguoyun.com/dav/save-accout-plugin');
+check('带文件名', bundleUrl({ url: 'https://dav.jianguoyun.com/dav/', dir: 'save-accout-plugin' }),
+  `https://dav.jianguoyun.com/dav/save-accout-plugin/${BUNDLE_NAME}`);
 check('基址末尾斜杠可有可无', buildDavUrl('https://dav.jianguoyun.com/dav', 'a', ''),
   'https://dav.jianguoyun.com/dav/a');
 check('多重斜杠被规整', buildDavUrl('https://x.com/dav///', '///a//', ''), 'https://x.com/dav/a');

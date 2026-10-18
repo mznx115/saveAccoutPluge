@@ -162,7 +162,7 @@ function renderWebDav() {
       </label>
       <label class="field grow">
         <span>远端目录</span>
-        <input id="davDir" type="text" placeholder="cockpit-tools"
+        <input id="davDir" type="text" placeholder="save-accout-plugin"
                value="${escapeHtml(dav.dir || '')}">
       </label>
     </div>
@@ -402,7 +402,7 @@ function readDavForm() {
   return {
     url: ($('#davUrl')?.value || '').trim() || 'https://dav.jianguoyun.com/dav/',
     username: ($('#davUser')?.value || '').trim(),
-    dir: ($('#davDir')?.value || '').trim() || 'cockpit-tools',
+    dir: ($('#davDir')?.value || '').trim() || 'save-accout-plugin',
     password: $('#davPass')?.value || '',
   };
 }
@@ -432,7 +432,7 @@ const actions = {
   async 'dav-save'() {
     const url = ($('#davUrl')?.value || '').trim();
     const username = ($('#davUser')?.value || '').trim();
-    const dir = ($('#davDir')?.value || '').trim() || 'cockpit-tools';
+    const dir = ($('#davDir')?.value || '').trim() || 'save-accout-plugin';
     const password = $('#davPass')?.value || '';
     if (!url) { toast('请填写服务地址', 'error'); return; }
     await run(async () => {

@@ -74,7 +74,7 @@ Chrome / Edge（Manifest V3）扩展：把当前站点的 **Cookie + localStorag
 | 服务地址 | 坚果云默认 `https://dav.jianguoyun.com/dav/` |
 | 邮箱或用户名 | 坚果云用**账号邮箱** |
 | 应用密码 | 坚果云 →「账户信息 → 安全选项 → 添加应用密码」生成。**填登录密码会返回 401** |
-| 远端目录 | 默认 `cockpit-tools`，只管理该目录下的备份文件 |
+| 远端目录 | 默认 `save-accout-plugin`，只管理该目录下的备份文件 |
 
 远端只存一个文件：`<目录>/save-account-plugin.bundle.json`。
 
