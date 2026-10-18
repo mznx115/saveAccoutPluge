@@ -3,11 +3,15 @@ import { exportAll, isDownloadsSupported, normalizeImport, readJsonFiles } from 
 import { presentError } from '../lib/errors.js';
 import { siteOriginPatterns } from '../lib/host-permission.js';
 import { enableEncryption, isUnlocked, lock, removeAccount, unlock } from '../lib/schema.js';
-import { getSettings, setSettings } from '../lib/settings.js';
+import {
+  getSettings, getWebDavPassword, resolveWebDavConfig, setSettings, setWebDavPassword,
+} from '../lib/settings.js';
 import {
   clearAll, deleteSiteFile, getStorageUsage, listSiteFiles, mergeSiteFile,
   readSiteFile, writeSiteFile,
 } from '../lib/store.js';
+import { syncWithWebDav } from '../lib/sync.js';
+import { BUNDLE_NAME, testConnection } from '../lib/webdav.js';
 import { escapeHtml, relativeTime } from '../lib/ui.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -15,6 +19,7 @@ const $ = (sel) => document.querySelector(sel);
 const state = {
   settings: null,
   unlocked: false,
+  webdavPasswordSaved: false,
   files: [],
   usage: { bytes: 0, pretty: '0 B' },
   busy: false,
@@ -54,6 +59,7 @@ async function run(fn, okMessage) {
 async function refresh() {
   state.settings = await getSettings();
   state.unlocked = await isUnlocked();
+  state.webdavPasswordSaved = Boolean(await getWebDavPassword());
   state.usage = await getStorageUsage();
   state.files = await listSiteFiles();
 
@@ -69,6 +75,7 @@ async function refresh() {
 
   renderLockBadge();
   renderStorage();
+  renderWebDav();
   renderSecurity();
   renderSettings();
   renderAccounts();
@@ -123,7 +130,62 @@ function renderStorage() {
   `;
 }
 
-/* ------------------------------- 2. 加密 ------------------------------- */
+/* ------------------------------- 2. WebDAV 同步 ------------------------------- */
+
+function renderWebDav() {
+  const el = $('#webdavBody');
+  const dav = state.settings.webdav || {};
+  const hasPwd = Boolean(state.webdavPasswordSaved);
+  const fileName = BUNDLE_NAME;
+
+  el.innerHTML = `
+    <div class="hint">
+      同步到 WebDAV（坚果云等）。同步时会<b>先下载远端 → 与本地合并 → 再上传</b>，
+      两台设备各自新增的账号都会保留，不会互相覆盖。
+    </div>
+
+    <div class="grid">
+      <label class="field grow">
+        <span>服务地址</span>
+        <input id="davUrl" type="text" placeholder="https://dav.jianguoyun.com/dav/"
+               value="${escapeHtml(dav.url || '')}">
+      </label>
+      <label class="field grow">
+        <span>邮箱或用户名（坚果云用账号邮箱）</span>
+        <input id="davUser" type="text" autocomplete="username"
+               value="${escapeHtml(dav.username || '')}">
+      </label>
+      <label class="field grow">
+        <span>应用密码${hasPwd ? '（已保存，留空则保留）' : ''}</span>
+        <input id="davPass" type="password" autocomplete="off"
+               placeholder="${hasPwd ? '••••••（留空保持不变）' : '坚果云需使用「应用密码」'}">
+      </label>
+      <label class="field grow">
+        <span>远端目录</span>
+        <input id="davDir" type="text" placeholder="cockpit-tools"
+               value="${escapeHtml(dav.dir || '')}">
+      </label>
+    </div>
+
+    <div class="hint">
+      远端文件：<span class="mono">${escapeHtml(dav.dir || '')}/${escapeHtml(fileName)}</span>
+      —— 全部域名打包在这一个文件里。<br>
+      坚果云需要在「账户信息 → 安全选项」里添加<b>应用密码</b>，直接填登录密码会返回 401。
+    </div>
+
+    <div class="row">
+      <button data-act="dav-save" type="button">保存配置</button>
+      <button data-act="dav-test" type="button">测试连接</button>
+      <button class="primary" data-act="dav-sync" type="button">立即同步</button>
+    </div>
+
+    <div class="hint" id="davStatus">
+      ${dav.lastSyncAt ? `上次同步：${new Date(dav.lastSyncAt).toLocaleString()}` : '还没有同步过'}
+    </div>
+  `;
+}
+
+/* ------------------------------- 3. 加密 ------------------------------- */
 
 function renderSecurity() {
   const el = $('#securityBody');
@@ -335,7 +397,114 @@ async function importFiles(fileList) {
 
 /* ------------------------------- 操作 ------------------------------- */
 
+/** 读取 WebDAV 表单当前值（必须是同步的，便于在用户手势中第一时间申请权限） */
+function readDavForm() {
+  return {
+    url: ($('#davUrl')?.value || '').trim() || 'https://dav.jianguoyun.com/dav/',
+    username: ($('#davUser')?.value || '').trim(),
+    dir: ($('#davDir')?.value || '').trim() || 'cockpit-tools',
+    password: $('#davPass')?.value || '',
+  };
+}
+
+/**
+ * 只申请 WebDAV 服务器这一个域名的访问权限，而不是安装时就申请 "*://*​/*"。
+ * 必须在点击事件里尽早调用（前面不要插对网络的 await）。
+ */
+async function ensureDavPermission(url) {
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    throw new Error('服务地址格式不正确');
+  }
+  const origins = [`${origin}/*`];
+  if (await chrome.permissions.contains({ origins })) return true;
+  return chrome.permissions.request({ origins });
+}
+
+function setDavStatus(text) {
+  const el = $('#davStatus');
+  if (el) el.textContent = text;
+}
+
 const actions = {
+  async 'dav-save'() {
+    const url = ($('#davUrl')?.value || '').trim();
+    const username = ($('#davUser')?.value || '').trim();
+    const dir = ($('#davDir')?.value || '').trim() || 'cockpit-tools';
+    const password = $('#davPass')?.value || '';
+    if (!url) { toast('请填写服务地址', 'error'); return; }
+    await run(async () => {
+      await setSettings({
+        webdav: { url, username, dir, enabled: Boolean(username) },
+      });
+      const saved = await setWebDavPassword(password);
+      return saved;
+    }, (saved) => (saved ? '配置已保存（含应用密码）' : '配置已保存（应用密码保持不变）'));
+  },
+
+  async 'dav-test'() {
+    // 先申请权限：此刻仍在用户点击手势内
+    const form = readDavForm();
+    const granted = await ensureDavPermission(form.url);
+    if (!granted) { toast('未授权访问该 WebDAV 地址', 'error'); return; }
+    await run(async () => {
+      const config = await resolveWebDavConfig(form);
+      if (!config.username) throw new Error('请先填写邮箱或用户名');
+      if (!config.password) throw new Error('请先填写应用密码');
+      return testConnection(config);
+    }, (r) => (r.dirExists ? '连接成功，远端目录可用' : '连接成功，但远端目录还不存在（同步时会自动创建）'));
+  },
+
+  async 'dav-sync'() {
+    if (state.busy) return;
+    // 先申请权限：此刻仍在用户点击手势内，任何 await 网络请求都不能插在前面
+    const form = readDavForm();
+    if (!form.username) { toast('请先填写邮箱或用户名', 'error'); return; }
+    const granted = await ensureDavPermission(form.url);
+    if (!granted) { toast('未授权访问该 WebDAV 地址', 'error'); return; }
+
+    state.busy = true;
+    document.querySelectorAll('button[data-act]').forEach((b) => { b.disabled = true; });
+    try {
+      await setSettings({ webdav: { url: form.url, username: form.username, dir: form.dir } });
+      await setWebDavPassword(form.password);
+      const config = await resolveWebDavConfig(form);
+      if (!config.password) throw new Error('请先填写应用密码');
+
+      setDavStatus('正在下载远端数据…');
+      const report = await syncWithWebDav(config, {
+        listSiteFiles,
+        writeSiteFile,
+      }, (step) => {
+        setDavStatus({
+          'ensure-dir': '正在检查远端目录…',
+          download: '正在下载远端数据…',
+          merge: '正在合并本地数据…',
+          upload: '正在上传合并结果…',
+        }[step] || '同步中…');
+      });
+
+      await setSettings({ webdav: { lastSyncAt: new Date().toISOString() } });
+      const parts = [
+        `同步完成：远端 ${report.remoteSites} 个站点`,
+        `本地 ${report.localSitesBefore} → ${report.localSitesAfter} 个站点`,
+      ];
+      if (report.newSites) parts.push(`新增 ${report.newSites} 个站点`);
+      if (report.addedAccounts) parts.push(`新增 ${report.addedAccounts} 个账号`);
+      parts.push(`已上传 ${(report.uploadedBytes / 1024).toFixed(1)} KB`);
+      toast(parts.join('，'));
+    } catch (err) {
+      console.error(err);
+      toast(presentError(err), 'error');
+      setDavStatus(`同步失败：${presentError(err)}`);
+    } finally {
+      state.busy = false;
+      await refresh();
+    }
+  },
+
   async 'export-all'() {
     await run(async () => {
       if (!state.files.length) throw new Error('还没有任何快照');

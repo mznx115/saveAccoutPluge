@@ -5,8 +5,9 @@ import { ensureHostPermission } from '../lib/host-permission.js';
 import {
   emptySiteFile, getAccountPayload, isUnlocked, putAccount, removeAccount, unlock,
 } from '../lib/schema.js';
-import { getSettings } from '../lib/settings.js';
+import { getSettings, resolveWebDavConfig, setSettings } from '../lib/settings.js';
 import { listSiteFiles, readSiteFile, writeSiteFile } from '../lib/store.js';
+import { syncWithWebDav } from '../lib/sync.js';
 import { escapeHtml, relativeTime } from '../lib/ui.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -354,6 +355,51 @@ $('#openOptions').addEventListener('click', () => {
   window.close();
 });
 $('#openStorage').addEventListener('click', doExport);
+
+/** popup 里的快捷同步：同样先申请权限（此刻在用户手势内） */
+$('#davSync').addEventListener('click', async () => {
+  if (state.busy) return;
+  const url = state.settings?.webdav?.url;
+  if (!url || !state.settings.webdav.username) {
+    toast('请先在管理页配置 WebDAV 账号', 'error');
+    return;
+  }
+  let origin;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    toast('WebDAV 地址格式不正确', 'error');
+    return;
+  }
+  const origins = [`${origin}/*`];
+  if (!(await chrome.permissions.contains({ origins }))
+    && !(await chrome.permissions.request({ origins }))) {
+    toast('未授权访问 WebDAV 服务器', 'error');
+    return;
+  }
+
+  setBusy(true);
+  try {
+    const config = await resolveWebDavConfig();
+    if (!config.password) { toast('请先在管理页填写应用密码', 'error'); return; }
+    toast('同步中，请稍候…');
+    const report = await syncWithWebDav(config, {
+      listSiteFiles,
+      writeSiteFile,
+    });
+    await setSettings({ webdav: { lastSyncAt: new Date().toISOString() } });
+    state.file = null;
+    await loadFile();
+    toast(`同步完成：本地 ${report.localSitesAfter} 个站点`
+      + (report.newSites ? `，新增 ${report.newSites} 个` : '')
+      + (report.addedAccounts ? `，新增 ${report.addedAccounts} 个账号` : ''));
+    render();
+  } catch (err) {
+    toast(presentError(err), 'error');
+  } finally {
+    setBusy(false);
+  }
+});
 
 init().catch((err) => {
   $('#app').innerHTML = `<div class="card"><div class="empty">初始化失败：${escapeHtml(presentError(err))}</div></div>`;

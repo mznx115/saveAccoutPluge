@@ -145,14 +145,38 @@ if (!relativeAll.includes('content/restore-at-start.js')) {
   fail('缺少 content/restore-at-start.js');
 }
 
-/* ---------------------------- 6. 隐私自检 ---------------------------- */
+/* ---------------------------- 6. 网络自检 ---------------------------- */
+// 只有 WebDAV 同步模块允许联网，且必须使用用户配置的地址。
+// 其他任何运行时代码出现网络调用都要报错，避免数据被偷偷外传。
+const NET_ALLOWED = new Set(['lib/webdav.js']);
 const netRe = /\b(fetch|XMLHttpRequest|WebSocket|EventSource|navigator\.sendBeacon)\b/;
+const netOffenders = [];
 for (const file of allFiles.filter((f) => ['.js', '.mjs'].includes(extname(f)))) {
   const rel = relative(ROOT, file).replace(/\\/g, '/');
   if (rel.startsWith('tools/') || rel.startsWith('tests/')) continue;
   const src = readFileSync(file, 'utf8');
-  if (netRe.test(src)) {
-    fail(`扩展运行时代码里出现网络调用（数据不应外传）: ${rel}`);
+  if (!netRe.test(src)) continue;
+  if (!NET_ALLOWED.has(rel)) {
+    fail(`扩展运行时代码里出现网络调用（只有 WebDAV 模块可以联网）: ${rel}`);
+  } else {
+    netOffenders.push(rel);
+  }
+}
+if (netOffenders.length === 0) {
+  note('lib/webdav.js 里没有网络调用？WebDAV 同步可能已失效');
+}
+
+/* ---------------------------- 6b. WebDAV 必须只打到用户配置的地址 ---------------------------- */
+const webdavPath = join(ROOT, 'lib/webdav.js');
+if (existsSync(webdavPath)) {
+  const src = readFileSync(webdavPath, 'utf8');
+  // 不允许出现写死的第三方域名（坚果云默认地址只应出现在设置默认值里）
+  const hardcoded = [...src.matchAll(/https?:\/\/[^\s'"`)]+/g)].map((m) => m[0]);
+  if (hardcoded.length) {
+    fail(`lib/webdav.js 里不应写死服务器地址（应由用户配置），发现: ${hardcoded.join(', ')}`);
+  }
+  if (!/Authorization/.test(src)) {
+    fail('lib/webdav.js 缺少 Authorization 头，请求会未鉴权');
   }
 }
 

@@ -70,6 +70,10 @@ main { max-width: 860px; margin: 0 auto; padding: 20px 24px 60px; display: flex;
 .row.between { justify-content: space-between; }
 .grow { flex: 1; min-width: 200px; }
 
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.grid .field { display: flex; flex-direction: column; gap: 4px; }
+.grid input { width: 100%; }
+
 button {
   font: inherit;
   cursor: pointer;

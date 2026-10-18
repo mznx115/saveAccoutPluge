@@ -49,6 +49,8 @@ const {
 const {
   bundleFileName, buildBundle, isBundle, normalizeImport, countAccounts, BUNDLE_FORMAT,
 } = await import('../lib/bundle.js');
+const { buildDavUrl, bundleUrl, BUNDLE_NAME } = await import('../lib/webdav.js');
+const { mergeRemoteIntoLocal, checkEncryptionCompat } = await import('../lib/sync.js');
 
 /* ----------------------------- 迷你测试框架 ----------------------------- */
 let passed = 0;
@@ -347,6 +349,114 @@ group('导入：宽松格式与文件名兜底');
 const loose = normalizeImport({ sites: { 'x.com': { accounts: [{ id: '1' }] } } });
 check('无 format 但带 sites 也能识别', loose[0].site, 'x.com');
 check('文件名不像域名时不瞎猜', rejects(() => normalizeImport({ accounts: [] }, 'backup.json')) !== '', true);
+
+/* ----------------------------- 8. WebDAV ----------------------------- */
+group('WebDAV 地址拼接');
+check('坚果云默认地址 + 目录', buildDavUrl('https://dav.jianguoyun.com/dav/', 'cockpit-tools', ''),
+  'https://dav.jianguoyun.com/dav/cockpit-tools');
+check('带文件名', bundleUrl({ url: 'https://dav.jianguoyun.com/dav/', dir: 'cockpit-tools' }),
+  `https://dav.jianguoyun.com/dav/cockpit-tools/${BUNDLE_NAME}`);
+check('基址末尾斜杠可有可无', buildDavUrl('https://dav.jianguoyun.com/dav', 'a', ''),
+  'https://dav.jianguoyun.com/dav/a');
+check('多重斜杠被规整', buildDavUrl('https://x.com/dav///', '///a//', ''), 'https://x.com/dav/a');
+check('中文目录被编码', buildDavUrl('https://x.com/dav', '备份 目录', ''), 'https://x.com/dav/%E5%A4%87%E4%BB%BD%20%E7%9B%AE%E5%BD%95');
+check('空目录只到基址', buildDavUrl('https://x.com/dav', '', ''), 'https://x.com/dav');
+check('缺协议报错', (() => { try { buildDavUrl('x.com/dav', 'a', ''); return ''; } catch (e) { return e.message; } })().includes('http'), true);
+
+group('WebDAV 同步：远端合并进本地');
+const localItems = [
+  {
+    site: 'taobao.com',
+    data: {
+      site: 'taobao.com',
+      accounts: [
+        { id: 'a1', label: '主号', lastUsedAt: '2025-01-01T00:00:00Z' },
+        { id: 'a2', label: '小号', lastUsedAt: '2025-01-01T00:00:00Z' },
+      ],
+      hosts: ['www.taobao.com'],
+      updatedAt: '2025-01-01T00:00:00Z',
+    },
+  },
+];
+const remoteBundle = {
+  format: BUNDLE_FORMAT,
+  sites: {
+    'taobao.com': {
+      site: 'taobao.com',
+      accounts: [
+        { id: 'a2', label: '小号', lastUsedAt: '2026-01-01T00:00:00Z' }, // 更新，应替换
+        { id: 'a3', label: '远端新号', lastUsedAt: '2026-01-01T00:00:00Z' }, // 新 id
+      ],
+      hosts: ['detail.taobao.com'],
+    },
+    'github.com': {
+      site: 'github.com',
+      accounts: [{ id: 'g1', label: 'gh', lastUsedAt: '2026-01-01T00:00:00Z' }],
+      hosts: ['github.com'],
+    },
+  },
+};
+
+const davMerged = mergeRemoteIntoLocal(localItems, remoteBundle);
+check('远端站点数被统计', davMerged.stats.remoteSites, 2);
+check('新增 1 个站点（github）', davMerged.stats.newSites, 1);
+check('合并后共 2 个站点', davMerged.items.length, 2);
+const tb = davMerged.items.find((i) => i.site === 'taobao.com').data;
+check('taobao 账号数 3', tb.accounts.length, 3);
+check('同 id 取远端更新的', tb.accounts.find((a) => a.id === 'a2').lastUsedAt, '2026-01-01T00:00:00Z');
+check('本地原有 a1 保留', tb.accounts.some((a) => a.id === 'a1'), true);
+check('hosts 合并', tb.hosts.sort(), ['detail.taobao.com', 'www.taobao.com']);
+
+group('WebDAV 同步：label 去重（两台设备各存一份「主号」）');
+const labelLocal = [{
+  site: 'x.com',
+  data: { site: 'x.com', accounts: [{ id: 'l1', label: '主号', lastUsedAt: '2025-01-01T00:00:00Z' }], hosts: [] },
+}];
+const labelRemote = {
+  format: BUNDLE_FORMAT,
+  sites: {
+    'x.com': { site: 'x.com', accounts: [{ id: 'l2', label: '主号', lastUsedAt: '2026-06-01T00:00:00Z' }], hosts: [] },
+  },
+};
+const labelMerged = mergeRemoteIntoLocal(labelLocal, labelRemote);
+const labelAccounts = labelMerged.items[0].data.accounts;
+check('同名账号被合并成 1 个', labelAccounts.length, 1);
+check('保留较新的那条', labelAccounts[0].id, 'l2');
+
+group('WebDAV 同步：远端为空时的行为');
+const emptyRemote = mergeRemoteIntoLocal(localItems, null);
+check('远端为空不报错', emptyRemote.items.length, 1);
+check('远端为空不改数据', emptyRemote.items[0].data.accounts.length, 2);
+check('远端站点数 0', emptyRemote.stats.remoteSites, 0);
+
+group('WebDAV 同步：非法远端格式');
+const badRemote = (() => {
+  try { mergeRemoteIntoLocal(localItems, { foo: 1 }); return ''; } catch (e) { return e.message; }
+})();
+check('拒绝非 bundle 内容', badRemote.includes('备份格式'), true);
+
+group('WebDAV 同步：加密一致性检查');
+const encFile = (salt) => ({
+  site: 'e.com', kdf: { salt }, accounts: [{ id: 'x', secret: { iv: 'a', data: 'b' } }],
+});
+const davPlainFile = (site = 'p.com') => ({
+  site, accounts: [{ id: 'y', secret: { plain: {} } }],
+});
+check('两边同盐可合并', checkEncryptionCompat(
+  [{ site: 'e.com', data: encFile('salt1') }], { 'e.com': encFile('salt1') },
+), null);
+check('两边盐不同被拒绝', Boolean(checkEncryptionCompat(
+  [{ site: 'e.com', data: encFile('salt1') }], { 'e.com': encFile('salt2') },
+)?.includes('口令不一致')), true);
+check('本地加密+远端明文被拒绝', Boolean(checkEncryptionCompat(
+  [{ site: 'e.com', data: encFile('salt1') }], { 'p.com': davPlainFile() },
+)?.includes('明文')), true);
+check('远端加密+本地明文被拒绝', Boolean(checkEncryptionCompat(
+  [{ site: 'p.com', data: davPlainFile() }], { 'e.com': encFile('salt1') },
+)?.includes('明文')), true);
+check('两边都明文可合并', checkEncryptionCompat(
+  [{ site: 'p.com', data: davPlainFile() }], { 'q.com': davPlainFile('q.com') },
+), null);
 
 /* ----------------------------- 汇总 ----------------------------- */
 console.log(`\n${'─'.repeat(48)}`);
